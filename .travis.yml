@@ -14,7 +14,3 @@ script: mvn test -q
 # Services to start for tests.
 services:
   - mongodb
-
-
-# Use the Container based infrastructure.
-sudo: false

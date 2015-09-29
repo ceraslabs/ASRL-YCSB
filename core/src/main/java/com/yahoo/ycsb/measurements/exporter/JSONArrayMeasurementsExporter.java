@@ -36,6 +36,7 @@ public class JSONArrayMeasurementsExporter implements MeasurementsExporter
 
   public JSONArrayMeasurementsExporter(OutputStream os) throws IOException
   {
+
     BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(os));
     g = factory.createJsonGenerator(bw);
     g.setPrettyPrinter(new DefaultPrettyPrinter());

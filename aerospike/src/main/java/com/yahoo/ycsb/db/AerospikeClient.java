@@ -1,20 +1,3 @@
-/**
- * Copyright (c) 2015 YCSB contributors. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License. You
- * may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
- * implied. See the License for the specific language governing
- * permissions and limitations under the License. See accompanying
- * LICENSE file.
- */
-
 package com.yahoo.ycsb.db;
 
 import java.util.HashMap;
@@ -27,6 +10,7 @@ import com.aerospike.client.AerospikeException;
 import com.aerospike.client.Bin;
 import com.aerospike.client.Key;
 import com.aerospike.client.Record;
+import com.aerospike.client.ResultCode;
 import com.aerospike.client.policy.ClientPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.RecordExistsAction;
@@ -37,6 +21,8 @@ import com.yahoo.ycsb.ByteIterator;
 import com.yahoo.ycsb.DBException;
 
 public class AerospikeClient extends com.yahoo.ycsb.DB {
+  private static final boolean DEBUG = false;
+
   private static final String DEFAULT_HOST = "localhost";
   private static final String DEFAULT_PORT = "3000";
   private static final String DEFAULT_TIMEOUT = "10000";
@@ -44,6 +30,9 @@ public class AerospikeClient extends com.yahoo.ycsb.DB {
 
   private static final int RESULT_OK = 0;
   private static final int RESULT_ERROR = -1;
+
+  private static final int WRITE_OVERLOAD_DELAY = 5;
+  private static final int WRITE_OVERLOAD_TRIES = 3;
 
   private String namespace = null;
 
@@ -110,7 +99,10 @@ public class AerospikeClient extends com.yahoo.ycsb.DB {
       }
 
       if (record == null) {
-        System.err.println("Record key " + key + " not found (read)");
+        if (DEBUG) {
+          System.err.println("Record key " + key + " not found (read)");
+        }
+
         return RESULT_ERROR;
       }
 
@@ -143,15 +135,36 @@ public class AerospikeClient extends com.yahoo.ycsb.DB {
       ++index;
     }
 
+    int delay = WRITE_OVERLOAD_DELAY;
     Key keyObj = new Key(namespace, table, key);
 
-    try {
-      client.put(writePolicy, keyObj, bins);
-      return RESULT_OK;
-    } catch (AerospikeException e) {
-      System.err.println("Error while writing key " + key + ": " + e);
-      return RESULT_ERROR;
+    for (int tries = 0; tries < WRITE_OVERLOAD_TRIES; ++tries) {
+      try {
+        client.put(writePolicy, keyObj, bins);
+        return RESULT_OK;
+      } catch (AerospikeException e) {
+        if (e.getResultCode() != ResultCode.DEVICE_OVERLOAD) {
+          System.err.println("Error while writing key " + key + ": " + e);
+          return RESULT_ERROR;
+        }
+
+        try {
+          Thread.sleep(delay);
+        } catch (InterruptedException e2) {
+          if (DEBUG) {
+            System.err.println("Interrupted: " + e2);
+          }
+        }
+
+        delay *= 2;
+      }
     }
+
+    if (DEBUG) {
+      System.err.println("Device overload");
+    }
+
+    return RESULT_ERROR;
   }
 
   @Override
@@ -170,7 +183,10 @@ public class AerospikeClient extends com.yahoo.ycsb.DB {
   public int delete(String table, String key) {
     try {
       if (!client.delete(deletePolicy, new Key(namespace, table, key))) {
-        System.err.println("Record key " + key + " not found (delete)");
+        if (DEBUG) {
+          System.err.println("Record key " + key + " not found (delete)");
+        }
+
         return RESULT_ERROR;
       }
 
